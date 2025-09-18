@@ -8,12 +8,19 @@ import (
 	"syscall"
 	"time"
 
+	"fiber-rest-api/internal/db"
 	"fiber-rest-api/internal/router"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 func main() {
+	// initialize sqlite database (file: data.db)
+	if err := db.Init("data.db"); err != nil {
+		log.Fatalf("failed to initialize database: %v", err)
+	}
+	defer db.Close()
+
 	app := fiber.New()
 	router.SetupRoutes(app)
 

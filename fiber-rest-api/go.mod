@@ -2,7 +2,12 @@ module fiber-rest-api
 
 go 1.18
 
-require github.com/gofiber/fiber/v2 v2.30.0
+require (
+	github.com/gofiber/fiber/v2 v2.30.0
+	github.com/golang-jwt/jwt/v4 v4.5.2
+	github.com/mattn/go-sqlite3 v1.14.32
+	golang.org/x/crypto v0.0.0-20220214200702-86341886e292
+)
 
 require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
