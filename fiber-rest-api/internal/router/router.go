@@ -1,18 +1,25 @@
 package router
 
 import (
-    "github.com/gofiber/fiber/v2"
-    "fiber-rest-api/internal/handlers"
+	"fiber-rest-api/internal/handlers"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 func SetupRoutes(app *fiber.App) {
-    app.Get("/", handlers.GetRoot)
+	app.Get("/", handlers.GetRoot)
 
-    // auth endpoints
-    app.Post("/auth/register", handlers.Register)
-    app.Post("/auth/login", handlers.Login)
+	// auth endpoints
+	app.Post("/auth/register", handlers.Register)
+	app.Post("/auth/login", handlers.Login)
 
-    // swagger
-    app.Get("/docs/swagger.json", handlers.SwaggerJSON)
-    app.Get("/docs", handlers.SwaggerUI)
+	// profile endpoints (protected)
+	app.Get("/profile", handlers.AuthRequired, handlers.GetProfile)
+	app.Put("/profile", handlers.AuthRequired, handlers.UpdateProfile)
+	// minimal UI to edit profile
+	app.Get("/profile/ui", handlers.ProfileUI)
+
+	// swagger
+	app.Get("/docs/swagger.json", handlers.SwaggerJSON)
+	app.Get("/docs", handlers.SwaggerUI)
 }

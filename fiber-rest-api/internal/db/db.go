@@ -23,7 +23,10 @@ func Init(path string) error {
 	create := `CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		email TEXT NOT NULL UNIQUE,
-		password TEXT NOT NULL
+		password TEXT NOT NULL,
+		first_name TEXT,
+		last_name TEXT,
+		phone TEXT
 	);`
 	if _, err := DB.Exec(create); err != nil {
 		return err
