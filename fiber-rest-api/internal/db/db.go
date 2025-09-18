@@ -26,7 +26,8 @@ func Init(path string) error {
 		password TEXT NOT NULL,
 		first_name TEXT,
 		last_name TEXT,
-		phone TEXT
+		phone TEXT,
+		avatar TEXT
 	);`
 	if _, err := DB.Exec(create); err != nil {
 		return err

@@ -3,7 +3,11 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -140,18 +144,24 @@ func GetProfile(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "invalid user id"})
 	}
 
-	var email, firstName, lastName, phone string
-	row := db.DB.QueryRow("SELECT email, first_name, last_name, phone FROM users WHERE id = ?", uid)
-	switch err := row.Scan(&email, &firstName, &lastName, &phone); err {
+	var email, firstName, lastName, phone, avatar string
+	row := db.DB.QueryRow("SELECT email, first_name, last_name, phone, avatar FROM users WHERE id = ?", uid)
+	switch err := row.Scan(&email, &firstName, &lastName, &phone, &avatar); err {
 	case sql.ErrNoRows:
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
 	case nil:
+		// return avatar as full path if set
+		avatarURL := ""
+		if avatar != "" {
+			avatarURL = "/uploads/" + avatar
+		}
 		return c.JSON(fiber.Map{
 			"id":         uid,
 			"email":      email,
 			"first_name": firstName,
 			"last_name":  lastName,
 			"phone":      phone,
+			"avatar":     avatarURL,
 		})
 	default:
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch user"})
@@ -165,7 +175,9 @@ type ProfileUpdate struct {
 	Phone     string `json:"phone"`
 }
 
-// UpdateProfile updates the current user's profile (first name, last name, phone).
+var phoneRe = regexp.MustCompile(`^[0-9()+\-\s]+$`)
+
+// UpdateProfile updates the current user's profile (first name, last name, phone) with validation.
 func UpdateProfile(c *fiber.Ctx) error {
 	uidRaw := c.Locals("user_id")
 	if uidRaw == nil {
@@ -181,6 +193,17 @@ func UpdateProfile(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
+	// Validation: max lengths and phone format
+	if len(req.FirstName) > 100 || len(req.LastName) > 100 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "first_name/last_name too long (max 100)"})
+	}
+	if len(req.Phone) > 20 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "phone too long (max 20)"})
+	}
+	if strings.TrimSpace(req.Phone) != "" && !phoneRe.MatchString(req.Phone) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "phone contains invalid characters"})
+	}
+
 	_, err := db.DB.Exec("UPDATE users SET first_name = ?, last_name = ?, phone = ? WHERE id = ?", strings.TrimSpace(req.FirstName), strings.TrimSpace(req.LastName), strings.TrimSpace(req.Phone), uid)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update profile"})
@@ -188,6 +211,74 @@ func UpdateProfile(c *fiber.Ctx) error {
 
 	// Return updated profile
 	return GetProfile(c)
+}
+
+// helper to save uploaded file and return filename
+func saveUploadedFile(fileHeader *multipart.FileHeader, uid int) (string, error) {
+	file, err := fileHeader.Open()
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	// validate content type by extension and header
+	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" {
+		return "", fmt.Errorf("unsupported file extension")
+	}
+
+	// ensure uploads dir
+	if err := os.MkdirAll("uploads", 0755); err != nil {
+		return "", err
+	}
+	fname := fmt.Sprintf("u%d_%d%s", uid, time.Now().Unix(), ext)
+	outPath := filepath.Join("uploads", fname)
+	out, err := os.Create(outPath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, file); err != nil {
+		return "", err
+	}
+	return fname, nil
+}
+
+// UploadAvatar handles multipart file upload for user's avatar.
+func UploadAvatar(c *fiber.Ctx) error {
+	uidRaw := c.Locals("user_id")
+	if uidRaw == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	uid, ok := uidRaw.(int)
+	if !ok {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "invalid user id"})
+	}
+
+	// Fiber provides c.FormFile to access uploaded files; no ParseMultipartForm needed.
+
+	fileHeader, err := c.FormFile("avatar")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing avatar file"})
+	}
+
+	// limit file size (basic check)
+	if fileHeader.Size > 5<<20 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large (max 5MB)"})
+	}
+
+	fname, err := saveUploadedFile(fileHeader, uid)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	_, err = db.DB.Exec("UPDATE users SET avatar = ? WHERE id = ?", fname, uid)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update avatar"})
+	}
+
+	return c.JSON(fiber.Map{"avatar": "/uploads/" + fname})
 }
 
 // ProfileUI serves a minimal HTML page that lets a user view and edit their profile using the API.
@@ -203,6 +294,7 @@ func ProfileUI(c *fiber.Ctx) error {
       input { width:100%; padding:0.5rem; }
       button { margin-top:1rem; padding:0.6rem 1rem; }
       .token { margin-bottom:1rem; }
+      img.avatar { max-width:120px; display:block; margin-top:0.5rem; }
     </style>
   </head>
   <body>
@@ -214,6 +306,11 @@ func ProfileUI(c *fiber.Ctx) error {
       <button id="load">Load profile</button>
     </div>
     <form id="profile" onsubmit="return false;">
+      <label>Avatar</label>
+      <img id="avatarPreview" class="avatar" src="" alt="avatar" />
+      <input id="avatarFile" type="file" accept="image/*" />
+      <button id="uploadAvatar">Upload Avatar</button>
+
       <label>ชื่อ (First name)</label>
       <input id="first_name" />
       <label>นามสกุล (Last name)</label>
@@ -228,17 +325,17 @@ func ProfileUI(c *fiber.Ctx) error {
       const loadBtn = document.getElementById('load')
       const saveBtn = document.getElementById('save')
       const tokenInput = document.getElementById('token')
+      const uploadBtn = document.getElementById('uploadAvatar')
 
-      async function api(path, method='GET', body) {
+      async function api(path, method='GET', body, isJSON=true) {
         const token = tokenInput.value.trim()
         if (!token) { alert('Please provide token'); return null }
+        const headers = { 'Authorization': 'Bearer ' + token }
+        if (isJSON) headers['Content-Type'] = 'application/json'
         const res = await fetch(path, {
           method,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-          },
-          body: body ? JSON.stringify(body) : undefined
+          headers,
+          body: body ? (isJSON ? JSON.stringify(body) : body) : undefined
         })
         if (!res.ok) {
           const e = await res.json().catch(()=>({error:'failed'}))
@@ -255,6 +352,8 @@ func ProfileUI(c *fiber.Ctx) error {
         document.getElementById('last_name').value = data.last_name || ''
         document.getElementById('phone').value = data.phone || ''
         document.getElementById('email').value = data.email || ''
+        const avatar = data.avatar || ''
+        document.getElementById('avatarPreview').src = avatar || ''
       }
 
       saveBtn.onclick = async () => {
@@ -265,6 +364,19 @@ func ProfileUI(c *fiber.Ctx) error {
         }
         const data = await api('/profile', 'PUT', body)
         if (data) alert('Saved')
+      }
+
+      uploadBtn.onclick = async (e) => {
+        e.preventDefault()
+        const fileInput = document.getElementById('avatarFile')
+        if (!fileInput.files.length) { alert('Choose a file'); return }
+        const fd = new FormData()
+        fd.append('avatar', fileInput.files[0])
+        const data = await api('/profile/avatar', 'POST', fd, false)
+        if (data && data.avatar) {
+          document.getElementById('avatarPreview').src = data.avatar
+          alert('Uploaded')
+        }
       }
     </script>
   </body>

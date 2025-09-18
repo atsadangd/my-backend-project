@@ -5,7 +5,7 @@ import (
 )
 
 func SwaggerJSON(c *fiber.Ctx) error {
-	// Minimal OpenAPI 3.0 JSON describing the auth endpoints
+	// OpenAPI 3.0 JSON describing auth and profile endpoints
 	spec := `{
   "openapi": "3.0.0",
   "info": { "title": "Fiber REST API", "version": "1.0.0" },
@@ -17,21 +17,11 @@ func SwaggerJSON(c *fiber.Ctx) error {
           "required": true,
           "content": {
             "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "email": { "type": "string" },
-                  "password": { "type": "string" }
-                },
-                "required": ["email", "password"]
-              }
+              "schema": { "$ref": "#/components/schemas/AuthRequest" }
             }
           }
         },
-        "responses": {
-          "201": { "description": "registered" },
-          "409": { "description": "email already registered" }
-        }
+        "responses": { "201": { "description": "registered" }, "409": { "description": "email already registered" } }
       }
     },
     "/auth/login": {
@@ -41,21 +31,89 @@ func SwaggerJSON(c *fiber.Ctx) error {
           "required": true,
           "content": {
             "application/json": {
+              "schema": { "$ref": "#/components/schemas/AuthRequest" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "token returned", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TokenResponse" } } } }, "401": { "description": "invalid credentials" } }
+      }
+    },
+    "/profile": {
+      "get": {
+        "summary": "Get current user's profile",
+        "security": [ { "bearerAuth": [] } ],
+        "responses": { "200": { "description": "profile returned", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Profile" } } } }, "401": { "description": "unauthorized" } }
+      },
+      "put": {
+        "summary": "Update current user's profile",
+        "security": [ { "bearerAuth": [] } ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ProfileUpdate" } }
+          }
+        },
+        "responses": { "200": { "description": "updated profile", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Profile" } } } }, "400": { "description": "validation error" }, "401": { "description": "unauthorized" } }
+      }
+    },
+    "/profile/avatar": {
+      "post": {
+        "summary": "Upload avatar for current user",
+        "security": [ { "bearerAuth": [] } ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "email": { "type": "string" },
-                  "password": { "type": "string" }
+                  "avatar": { "type": "string", "format": "binary" }
                 },
-                "required": ["email", "password"]
+                "required": ["avatar"]
               }
             }
           }
         },
-        "responses": {
-          "200": { "description": "token returned" },
-          "401": { "description": "invalid credentials" }
+        "responses": { "200": { "description": "avatar uploaded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AvatarResponse" } } } }, "400": { "description": "invalid file" }, "401": { "description": "unauthorized" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "schemas": {
+      "AuthRequest": {
+        "type": "object",
+        "properties": { "email": { "type": "string" }, "password": { "type": "string" } },
+        "required": ["email", "password"]
+      },
+      "TokenResponse": {
+        "type": "object",
+        "properties": { "token": { "type": "string" } }
+      },
+      "Profile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "email": { "type": "string" },
+          "first_name": { "type": "string" },
+          "last_name": { "type": "string" },
+          "phone": { "type": "string" },
+          "avatar": { "type": "string" }
         }
+      },
+      "ProfileUpdate": {
+        "type": "object",
+        "properties": {
+          "first_name": { "type": "string" },
+          "last_name": { "type": "string" },
+          "phone": { "type": "string" }
+        }
+      },
+      "AvatarResponse": {
+        "type": "object",
+        "properties": { "avatar": { "type": "string" } }
       }
     }
   }

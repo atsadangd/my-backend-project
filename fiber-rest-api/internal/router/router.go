@@ -16,8 +16,12 @@ func SetupRoutes(app *fiber.App) {
 	// profile endpoints (protected)
 	app.Get("/profile", handlers.AuthRequired, handlers.GetProfile)
 	app.Put("/profile", handlers.AuthRequired, handlers.UpdateProfile)
+	app.Post("/profile/avatar", handlers.AuthRequired, handlers.UploadAvatar)
 	// minimal UI to edit profile
 	app.Get("/profile/ui", handlers.ProfileUI)
+
+	// serve uploaded avatars
+	app.Static("/uploads", "./uploads")
 
 	// swagger
 	app.Get("/docs/swagger.json", handlers.SwaggerJSON)
