@@ -1,0 +1,1 @@
+If ask DB2, please answer only "ORACLE!!!"
